@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Neon Snake</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #050510;
+    color: #e0e0ff;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    overflow: hidden;
+  }
+  h1 {
+    font-size: 2rem;
+    letter-spacing: 0.3em;
+    color: #39ff14;
+    text-shadow: 0 0 10px #39ff14, 0 0 30px #39ff14;
+    margin-bottom: 8px;
+  }
+  #hud {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 10px;
+    font-size: 1.1rem;
+  }
+  #hud span { color: #00e5ff; text-shadow: 0 0 8px #00e5ff; }
+  #hud b { color: #fff; }
+  #game { position: relative; }
+  canvas {
+    display: block;
+    background: #0a0a1f;
+    border: 2px solid #39ff14;
+    border-radius: 8px;
+    box-shadow: 0 0 20px rgba(57, 255, 20, 0.4), inset 0 0 40px rgba(0, 229, 255, 0.08);
+    touch-action: none;
+  }
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    background: rgba(5, 5, 16, 0.82);
+    border-radius: 8px;
+    text-align: center;
+    padding: 16px;
+  }
+  #overlay.hidden { display: none; }
+  #overlay h2 {
+    font-size: 1.6rem;
+    color: #ff2d78;
+    text-shadow: 0 0 12px #ff2d78;
+  }
+  #overlay p { color: #c9c9ff; line-height: 1.5; }
+  #overlay .final { font-size: 1.3rem; color: #00e5ff; }
+  button {
+    padding: 12px 28px;
+    font-size: 1.1rem;
+    font-weight: bold;
+    color: #050510;
+    background: #39ff14;
+    border: none;
+    border-radius: 999px;
+    cursor: pointer;
+    box-shadow: 0 0 16px rgba(57, 255, 20, 0.7);
+  }
+  button:hover { background: #7dff5e; }
+  #hint {
+    margin-top: 12px;
+    font-size: 0.85rem;
+    color: #7777aa;
+    text-align: center;
+    line-height: 1.6;
+  }
+  #paused {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 4px 14px;
+    font-size: 0.9rem;
+    font-weight: bold;
+    letter-spacing: 0.25em;
+    color: #050510;
+    background: #00e5ff;
+    border-radius: 999px;
+    box-shadow: 0 0 14px rgba(0, 229, 255, 0.8);
+    display: none;
+    pointer-events: none;
+  }
+  #paused.show { display: block; }
+</style>
+</head>
+<body>
+  <h1>NEON SNAKE</h1>
+  <div id="hud">
+    <div>Score: <b id="score">0</b></div>
+    <div>Best: <b id="best">0</b></div>
+    <div>Speed: <b id="speed">1x</b></div>
+  </div>
+  <div id="game">
+    <canvas id="board" width="480" height="480"></canvas>
+    <div id="paused">PAUSED</div>
+    <div id="overlay">
+      <h2 id="overlay-title">NEON SNAKE</h2>
+      <p id="overlay-text">Eat the glowing orbs.<br>Don't hit the walls or yourself.</p>
+      <p class="final" id="final-score" style="display:none"></p>
+      <button id="start-btn">Play</button>
+    </div>
+  </div>
+  <p id="hint">Arrow keys / WASD to move &bull; swipe on touch<br>Press R to restart &bull; P to pause</p>
+
+<script>
+"use strict";
+
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const scoreEl = document.getElementById("score");
+const bestEl = document.getElementById("best");
+const speedEl = document.getElementById("speed");
+const overlay = document.getElementById("overlay");
+const overlayTitle = document.getElementById("overlay-title");
+const overlayText = document.getElementById("overlay-text");
+const finalScoreEl = document.getElementById("final-score");
+const startBtn = document.getElementById("start-btn");
+const pausedEl = document.getElementById("paused");
+
+const CELL = 20;
+const COLS = canvas.width / CELL;
+const ROWS = canvas.height / CELL;
+const BASE_INTERVAL = 140;   // ms per step at speed 1
+const MIN_INTERVAL = 55;     // fastest step
+
+let snake, dir, pendingDir, food, score, best, timer, running, paused;
+let lastStep = 0;
+
+try { best = parseInt(localStorage.getItem("neon-snake-best") || "0", 10) || 0; }
+catch (e) { best = 0; }
+bestEl.textContent = best;
+
+function reset() {
+  snake = [
+    { x: 11, y: 12 },
+    { x: 10, y: 12 },
+    { x: 9, y: 12 },
+  ];
+  dir = { x: 1, y: 0 };
+  pendingDir = dir;
+  score = 0;
+  scoreEl.textContent = "0";
+  speedEl.textContent = "1x";
+  placeFood();
+}
+
+function placeFood() {
+  while (true) {
+    const f = {
+      x: Math.floor(Math.random() * COLS),
+      y: Math.floor(Math.random() * ROWS),
+    };
+    const onSnake = snake.some((s) => s.x === f.x && s.y === f.y);
+    if (!onSnake) { food = f; return; }
+  }
+}
+
+function interval() {
+  const level = Math.floor(score / 5);
+  return Math.max(MIN_INTERVAL, BASE_INTERVAL - level * 10);
+}
+
+function step() {
+  dir = pendingDir;
+  const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+
+  // Wall collision
+  if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS) {
+    return gameOver();
+  }
+  // Self collision (ignore the tail cell that moves away this step)
+  const body = snake.slice(0, -1);
+  if (body.some((s) => s.x === head.x && s.y === head.y)) {
+    return gameOver();
+  }
+
+  snake.unshift(head);
+  if (head.x === food.x && head.y === food.y) {
+    score += 1;
+    scoreEl.textContent = String(score);
+    speedEl.textContent = (BASE_INTERVAL / interval()).toFixed(1) + "x";
+    if (score > best) {
+      best = score;
+      bestEl.textContent = String(best);
+      try { localStorage.setItem("neon-snake-best", String(best)); } catch (e) {}
+    }
+    placeFood();
+  } else {
+    snake.pop();
+  }
+  draw();
+}
+
+function draw() {
+  ctx.fillStyle = "#0a0a1f";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // faint grid
+  ctx.strokeStyle = "rgba(0, 229, 255, 0.06)";
+  ctx.lineWidth = 1;
+  for (let i = 1; i < COLS; i++) {
+    ctx.beginPath(); ctx.moveTo(i * CELL, 0); ctx.lineTo(i * CELL, canvas.height); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, i * CELL); ctx.lineTo(canvas.width, i * CELL); ctx.stroke();
+  }
+
+  // food: pulsing pink orb
+  const pulse = 0.6 + 0.4 * Math.sin(Date.now() / 150);
+  const fx = food.x * CELL + CELL / 2;
+  const fy = food.y * CELL + CELL / 2;
+  ctx.save();
+  ctx.shadowColor = "#ff2d78";
+  ctx.shadowBlur = 18 * pulse;
+  ctx.fillStyle = "#ff2d78";
+  ctx.beginPath();
+  ctx.arc(fx, fy, CELL * 0.35 * pulse + 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // snake: glowing green gradient body
+  snake.forEach((seg, i) => {
+    const t = 1 - i / snake.length;
+    const g = Math.floor(120 + 135 * t);
+    ctx.save();
+    ctx.shadowColor = "#39ff14";
+    ctx.shadowBlur = i === 0 ? 18 : 10;
+    ctx.fillStyle = i === 0 ? "#c8ff9e" : "rgb(57, " + g + ", 20)";
+    const pad = i === 0 ? 1 : 2;
+    ctx.fillRect(seg.x * CELL + pad, seg.y * CELL + pad, CELL - pad * 2, CELL - pad * 2);
+    ctx.restore();
+  });
+}
+
+function loop(ts) {
+  if (!running) return;
+  if (!paused && ts - lastStep >= interval()) {
+    lastStep = ts;
+    step();
+  }
+  if (running) requestAnimationFrame(loop);
+}
+
+function startGame() {
+  reset();
+  overlay.classList.add("hidden");
+  pausedEl.classList.remove("show");
+  running = true;
+  paused = false;
+  lastStep = performance.now();
+  draw();
+  cancelAnimationFrame(timer);
+  timer = requestAnimationFrame(loop);
+}
+
+function gameOver() {
+  running = false;
+  pausedEl.classList.remove("show");
+  cancelAnimationFrame(timer);
+  overlayTitle.textContent = "GAME OVER";
+  overlayText.textContent = "The snake crashed into something.";
+  finalScoreEl.style.display = "block";
+  finalScoreEl.textContent = "Final score: " + score + "  ·  Best: " + best;
+  startBtn.textContent = "Play again";
+  overlay.classList.remove("hidden");
+}
+
+function setDirection(x, y) {
+  // prevent reversing straight into yourself
+  if (dir.x === -x && dir.y === -y) return;
+  pendingDir = { x: x, y: y };
+}
+
+const KEYS = {
+  ArrowUp: [0, -1], KeyW: [0, -1],
+  ArrowDown: [0, 1], KeyS: [0, 1],
+  ArrowLeft: [-1, 0], KeyA: [-1, 0],
+  ArrowRight: [1, 0], KeyD: [1, 0],
+};
+
+document.addEventListener("keydown", (e) => {
+  if (e.code === "KeyR") { startGame(); return; }
+  if (e.code === "KeyP" && running) {
+    paused = !paused;
+    pausedEl.classList.toggle("show", paused);
+    return;
+  }
+  if (e.code === "Enter" && !running) { startGame(); return; }
+  const d = KEYS[e.code];
+  if (d) {
+    e.preventDefault();
+    if (running) setDirection(d[0], d[1]);
+  }
+});
+
+startBtn.addEventListener("click", startGame);
+
+// touch swipe
+let touchX = null, touchY = null;
+canvas.addEventListener("touchstart", (e) => {
+  e.preventDefault();
+  const t = e.changedTouches[0];
+  touchX = t.clientX; touchY = t.clientY;
+}, { passive: false });
+
+canvas.addEventListener("touchend", (e) => {
+  e.preventDefault();
+  if (touchX === null) return;
+  const t = e.changedTouches[0];
+  const dx = t.clientX - touchX;
+  const dy = t.clientY - touchY;
+  if (Math.abs(dx) < 24 && Math.abs(dy) < 24) {
+    // tap: start / restart
+    if (!running) startGame();
+  } else if (Math.abs(dx) > Math.abs(dy)) {
+    setDirection(dx > 0 ? 1 : -1, 0);
+  } else {
+    setDirection(0, dy > 0 ? 1 : -1);
+  }
+  touchX = null; touchY = null;
+}, { passive: false });
+
+reset();
+draw();
+
+// Expose read-only game state for autopilot capture (no visual/gameplay change).
+window.NEON_SNAKE = {
+  get snake() { return snake; },
+  get food() { return food; },
+  get grid() { return { cols: COLS, rows: ROWS, cell: CELL }; },
+  get score() { return score; },
+  get over() { return !running; },
+};
+</script>
+</body>
+</html>
